@@ -2,15 +2,23 @@
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-VERSION=$(oc get clusterversion version -o go-template='{{.status.desired.version}}')
-if [[ -z "$VERSION" ]]; then
-  CHANNEL=${1:-"stable-6.3"}
-elif [[ $VERSION =~ ^4\.(2[2-9]|[3-9][0-9]|[0-9]{3,}).*$ ]]; then
-  CHANNEL="stable-6.5"
-elif [[ $VERSION =~ ^4\.2[0-1].* ]]; then
-  CHANNEL="stable-6.4"
-else
-  CHANNEL="stable-6.3"
+# Select the loki/logging channel the cluster's redhat-operators catalog actually
+# advertises (OLM then installs that channel's head = latest patch). A hardcoded
+# OCP->channel map drifts out of sync with older catalogs (e.g. 4.16 ships only up
+# to stable-6.2, so a pinned stable-6.3 fails to resolve). An explicit $1 overrides.
+CHANNEL=${1:-$(oc get packagemanifests -n openshift-marketplace \
+  --field-selector metadata.name=loki-operator -l catalog=redhat-operators \
+  -o jsonpath='{.items[0].status.defaultChannel}' 2>/dev/null)}
+if [[ -z "$CHANNEL" ]]; then
+  # Fallback: derive from the OCP version if the packagemanifest is unavailable.
+  VERSION=$(oc get clusterversion version -o go-template='{{.status.desired.version}}')
+  if [[ $VERSION =~ ^4\.(2[2-9]|[3-9][0-9]|[0-9]{3,}).*$ ]]; then
+    CHANNEL="stable-6.5"
+  elif [[ $VERSION =~ ^4\.2[0-1].* ]]; then
+    CHANNEL="stable-6.4"
+  else
+    CHANNEL="stable-6.3"
+  fi
 fi
 
 apply_minio_statefulset() {
